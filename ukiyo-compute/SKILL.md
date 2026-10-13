@@ -1,14 +1,14 @@
 ---
 name: ukiyo-compute
-description: Use when asked to rent GPUs, execute workloads, inspect rentals, or terminate Ukiyo compute using an authorized prepaid autonomous agent account.
+description: Use when asked to rent GPUs, execute workloads, inspect rentals, or terminate Ukiyo compute using an authorized autonomous agent account.
 ---
 
-# Ukiyo compute — Skill 1.0.1
+# Ukiyo compute — Skill 1.0.2
 
 ## 1. What Ukiyo is
 
-Prepaid GPU rentals through one backend. CLI **0.2.2** is the canonical execution
-path; action MCP **0.2.0** is equivalent. Stay within the user's task and budget.
+GPU rentals through one backend, paid from the account's credit balance. CLI
+**0.2.5** is the canonical execution path; action MCP **0.2.0** is equivalent. Stay within the user's task and budget.
 After funding, authorized rentals need no per-rental human approval, Telegram
 navigation, or browser login. Pricing and business logic stay server-side.
 
@@ -20,24 +20,31 @@ Check any existing `ukiyo` installation before replacing its launcher.
 ```sh
 set -eu
 mkdir -p "$HOME/.local/bin"
-curl -fsSL https://u-kiyo.ai/releases/cli/0.2.2/ukiyo-cli-0.2.2.mjs -o "$HOME/.local/bin/ukiyo-cli-0.2.2.mjs"
-(cd "$HOME/.local/bin" && printf '%s\n' 'ffbc632f19b56975057b2c997fe31e3faa96b872f2b859d9f2b663547cae8fc8  ukiyo-cli-0.2.2.mjs' | shasum -a 256 -c -)
-chmod 700 "$HOME/.local/bin/ukiyo-cli-0.2.2.mjs"
-ln -sf ukiyo-cli-0.2.2.mjs "$HOME/.local/bin/ukiyo"
+curl -fsSL https://u-kiyo.ai/releases/cli/0.2.5/ukiyo-cli-0.2.5.mjs -o "$HOME/.local/bin/ukiyo-cli-0.2.5.mjs"
+(cd "$HOME/.local/bin" && printf '%s\n' '3328a07d01808f6a48343eb2af1cf86cc040f3b05b0077dc02857ec7538bee85  ukiyo-cli-0.2.5.mjs' | shasum -a 256 -c -)
+chmod 700 "$HOME/.local/bin/ukiyo-cli-0.2.5.mjs"
+ln -sf ukiyo-cli-0.2.5.mjs "$HOME/.local/bin/ukiyo"
 export PATH="$HOME/.local/bin:$PATH"
 ukiyo --version
 ```
 
-Stop on checksum failure. Expected version: `0.2.2`. Use the CLI directly, not a
+Stop on checksum failure. Expected version: `0.2.5`. On Windows, follow the
+[CLI installation guide](https://u-kiyo.ai/releases/cli/0.2.5/INSTALL.md). Use the CLI directly, not a
 legacy Skill API wrapper.
 
 ## 3. Signup
 
-Only if no account/credential exists:
+Only if no account/credential exists. Signup requires explicit agreement to the
+current [Terms](https://u-kiyo.ai/terms/) ([Privacy](https://u-kiyo.ai/privacy/)).
+Agree only when the user has authorized it; never infer or auto-accept a future
+version. `GET https://pay.u-kiyo.ai/api/v1/terms` returns the current version.
 
 ```sh
-ukiyo signup --json
+ukiyo signup --accept-terms 2026-10-10 --json
 ```
+
+A changed Terms version makes signup fail without creating an account; report it
+and ask the user. Agreement is once per account, not per rental.
 
 No email, browser or Telegram is required. Signup stores the scoped credential
 in `~/.ukiyo/credentials.json` (0600 inside a 0700 directory); output is account/key
@@ -78,6 +85,18 @@ supplies price/runtime. The $5 examples are budgets, not hourly-price claims.
 
 ## 6. Rent
 
+Check the billing model first:
+
+```sh
+ukiyo me --json
+```
+
+If `billing.model` is `ACCOUNT_BALANCE` and `budgetRequired` is `false`, `--budget`
+is optional: the rental draws from the shared balance until terminated, and Ukiyo
+stops it automatically when the balance can no longer cover it or a spending limit
+is reached. Pass `--budget` anyway to cap this rental. Otherwise (`LEGACY_PREPAID`)
+`--budget` is required and buys a fixed runtime.
+
 Respect the task budget and key's per-rental, remaining-budget and concurrency
 limits. Generate and save one key per intended rental before submitting:
 
@@ -116,13 +135,15 @@ ukiyo status DEPLOYMENT_ID --json
 
 Use `rentalId` for quote/failure/credit-reversal status, `deploymentId` for
 exec/status/terminate. Save important outputs before `endsAt` or termination.
-Purchased runtime expires automatically; nothing renews automatically.
+Prepaid runtime expires automatically; nothing renews. Account-balance rentals run
+until terminated or stopped automatically for low balance or a spending limit.
 
 ## 9. Terminate
 
 Terminate immediately when the authorized workload finishes, including after
-command failure. Termination is irreversible; voluntary early termination gives
-no unused-credit return. `--yes` makes task-authorized cleanup noninteractive.
+command failure. Termination is irreversible and destroys the instance and its
+data. Account balance: unused credit stays in the balance and final charges settle
+a few minutes later. Prepaid: early termination gives no unused-credit return. `--yes` makes task-authorized cleanup noninteractive.
 
 ```sh
 ukiyo terminate DEPLOYMENT_ID --yes --wait --json
@@ -130,8 +151,10 @@ ukiyo status DEPLOYMENT_ID --json
 ukiyo balance --json
 ```
 
-Require `TERMINATED`, not merely `accepted: true`. Verify balance/ledger: one debit
-for this order, no duplicate debit, no voluntary-termination reversal. A timeout
+Require `TERMINATED`, not merely `accepted: true`. Verify balance/ledger a few
+minutes later: charges for this rental only, no duplicate charge, no
+voluntary-termination reversal. A rental that failed before becoming usable is not
+charged. A timeout
 means unresolved cleanup: preserve the ID and report it; never claim success.
 
 ## 10. Failure/retry rules
@@ -174,5 +197,5 @@ read CLI credentials. For a new account, use CLI signup/funding first.
 | Wait/inspect | `get_rental({rentalId, waitForActive: true, timeoutSeconds: 600})`, `list_deployments` |
 | Execute/terminate | `run_command({deploymentId, command: "nvidia-smi"})`, `terminate_gpu({deploymentId, timeoutSeconds: 600})` |
 
-MCP uses the same scoped permissions, prepaid balance and retry rules. Keys stay
+MCP uses the same scoped permissions, balance and retry rules. Keys stay
 local; termination waits for API-confirmed `TERMINATED`. No separate workflow.
